@@ -2,13 +2,13 @@
   "name": "ai-text-humanizer-api",
   "version": "1.0.0",
   "type": "module",
-  "description": "",
-  "main": "index.js",
+  "description": "AI Text Humanizer API",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js"
   },
   "keywords": [],
-  "author": "",
+  "author": "Himanshu Mishra",
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.5",

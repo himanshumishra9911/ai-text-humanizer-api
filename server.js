@@ -9,6 +9,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -18,7 +19,7 @@ app.get("/", (req, res) => {
   res.json({ status: "AI Text Humanizer API is running" });
 });
 
-// ✅ FINAL WORKING HUMANIZER API
+// Humanizer API
 app.post("/humanize", async (req, res) => {
   try {
     const { text } = req.body;
@@ -32,7 +33,6 @@ app.post("/humanize", async (req, res) => {
       input: text,
     });
 
-    // ✅ SAFE extraction (MOST IMPORTANT PART)
     let humanizedText = "";
 
     if (response.output_text) {
@@ -66,5 +66,8 @@ app.post("/humanize", async (req, res) => {
   }
 });
 
+// 🚀 IMPORTANT — Render needs this
 const PORT = process.env.PORT || 3000;
-app.li
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
+});
