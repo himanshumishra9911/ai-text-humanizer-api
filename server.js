@@ -14,12 +14,12 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Health check
+// Health check (Render + browser test)
 app.get("/", (req, res) => {
   res.json({ status: "AI Text Humanizer API is running" });
 });
 
-// Humanizer API
+// Humanizer API (ONLY rewritten text, no questions)
 app.post("/humanize", async (req, res) => {
   try {
     const { text } = req.body;
@@ -31,8 +31,12 @@ app.post("/humanize", async (req, res) => {
     const response = await openai.responses.create({
       model: "gpt-4.1-mini",
       input: text,
+      instructions:
+        "Rewrite the input text so it sounds completely human-written, natural, fluent, and SEO-friendly. Do NOT add explanations, questions, suggestions, or extra commentary. Return ONLY the rewritten text.",
+      temperature: 0.9
     });
 
+    // Safe extraction
     let humanizedText = "";
 
     if (response.output_text) {
@@ -66,7 +70,7 @@ app.post("/humanize", async (req, res) => {
   }
 });
 
-// 🚀 IMPORTANT — Render needs this
+// IMPORTANT: Render needs dynamic PORT + 0.0.0.0
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
