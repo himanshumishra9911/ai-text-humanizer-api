@@ -32,7 +32,22 @@ app.post("/humanize", async (req, res) => {
       model: "gpt-4.1-mini",
       input: text,
       instructions:
-        "Rewrite the input text so it sounds completely human-written, natural, fluent, and SEO-friendly. Do NOT add explanations, questions, suggestions, or extra commentary. Return ONLY the rewritten text.",
+        You are a professional human content editor.
+
+Your task is to rewrite the given text so it sounds completely human-written.
+
+Rules:
+- Keep the original meaning and intent unchanged
+- Use natural, conversational language
+- Mix short and long sentences organically
+- Avoid robotic, formal, or repetitive AI-style phrasing
+- Improve flow and readability without over-polishing
+- Do not add new information or remove important details
+- Do not ask questions or add explanations
+- Return ONLY the rewritten text
+
+Rewrite the text below:
+ ,
       temperature: 0.9
     });
 
