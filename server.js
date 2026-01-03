@@ -19,7 +19,7 @@ app.get("/", (req, res) => {
   res.json({ status: "AI Text Humanizer API is running" });
 });
 
-// Humanizer API
+// Humanizer API (detector-focused)
 app.post("/humanize", async (req, res) => {
   try {
     const { text } = req.body;
@@ -32,29 +32,28 @@ app.post("/humanize", async (req, res) => {
       model: "gpt-4.1-mini",
       input: text,
       instructions: `
-You are a professional human content editor.
+Rewrite the text as if it were written casually by a real person, not an AI.
 
-Your task is to rewrite the given text so it sounds completely human-written.
-
-Rules:
-- Keep the original meaning and intent unchanged
-- Use natural, conversational language
-- Mix short and long sentences organically
-- Avoid robotic, formal, or repetitive AI-style phrasing
-- Improve flow and readability without over-polishing
-- Do not add new information or remove important details
-- Do not ask questions or add explanations
+Guidelines:
+- Keep the original meaning exactly the same
+- Write naturally, the way humans actually think and type
+- Vary sentence length unevenly; avoid balance and symmetry
+- Occasionally use sentence fragments or slightly informal phrasing
+- Avoid polished, academic, or editor-like tone
+- Let the writing feel a little imperfect, but still clear
+- Do not explain anything
+- Do not ask questions
+- Do not add headings or formatting
+- Do not mention rewriting, editing, or AI
 - Return ONLY the rewritten text
 
-Occasionally use informal phrasing, mild sentence fragments, and subtle human imperfections. Avoid symmetrical sentence structures. Vary tone slightly within the paragraph.
-
-Rewrite the text below:
+Write like a human who knows the topic but isn’t trying to sound perfect.
 `,
-      temperature: 1.05,
-      top_p: 0.9
+      temperature: 1.15,
+      top_p: 0.85
     });
 
-    // Safe extraction
+    // -------- Safe extraction --------
     let humanizedText = "";
 
     if (response.output_text) {
@@ -72,6 +71,46 @@ Rewrite the text below:
     if (!humanizedText) {
       return res.status(500).json({ error: "No text generated" });
     }
+
+    // -------- Human noise injection (detector breaker) --------
+    const fillers = [
+      "Honestly,",
+      "In simple terms,",
+      "That’s the thing—",
+      "If you think about it,",
+      "In day-to-day use,",
+      ""
+    ];
+
+    const endings = [
+      "",
+      " And yeah, it just works.",
+      " Nothing too fancy.",
+      " It’s pretty straightforward.",
+      ""
+    ];
+
+    function injectHumanNoise(text) {
+      const sentences = text.split(". ");
+      if (sentences.length < 3) return text;
+
+      // Random filler at start
+      const start = fillers[Math.floor(Math.random() * fillers.length)];
+      if (start) {
+        sentences[0] = `${start} ${sentences[0]}`;
+      }
+
+      // Randomly weaken one sentence (remove a comma if exists)
+      const index = Math.floor(Math.random() * sentences.length);
+      sentences[index] = sentences[index].replace(",", "");
+
+      // Random casual ending
+      const end = endings[Math.floor(Math.random() * endings.length)];
+
+      return sentences.join(". ") + end;
+    }
+
+    humanizedText = injectHumanNoise(humanizedText);
 
     res.json({
       success: true,
