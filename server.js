@@ -103,7 +103,7 @@ Rules:
 });
 
 /* =========================
-   AI TEXT DETECTOR (HIGHLIGHT READY)
+   AI TEXT DETECTOR (STRICT + HIGHLIGHT READY)
 ========================= */
 app.post("/detect", async (req, res) => {
   try {
@@ -113,9 +113,11 @@ app.post("/detect", async (req, res) => {
       return res.status(400).json({ error: "Text is required" });
     }
 
+    // Split text into meaningful sentences
     const sentences = text
       .split(/(?<=[.!?])\s+/)
-      .filter(s => s.trim().length > 10);
+      .map(s => s.trim())
+      .filter(s => s.length > 10);
 
     const results = [];
     let totalAI = 0;
@@ -125,9 +127,18 @@ app.post("/detect", async (req, res) => {
         model: "gpt-4.1-mini",
         input: sentence,
         instructions: `
-You are an AI content detection system.
+You are a STRICT AI content detection system.
 
-Return ONLY valid JSON:
+Your task is to judge how likely the sentence is AI-generated.
+
+Rules:
+- Be skeptical by default
+- Neutral, informational, SEO-style, or polished sentences → AI
+- Only mark human if there is clear opinion, inconsistency, casual tone, or natural imperfection
+- If unsure, lean towards AI
+- Do NOT be generous
+
+Return ONLY valid JSON in this exact format:
 {
   "ai": number,
   "human": number,
@@ -135,8 +146,11 @@ Return ONLY valid JSON:
 }
 
 Rules:
-- ai + human = 100
-- No extra text
+- ai + human must equal 100
+- ai must be >= 80 for formal or polished sentences
+- ai must be >= 60 for neutral informational sentences
+- Do NOT include any extra text
+
 Sentence:
 "${sentence}"
 `
@@ -156,14 +170,20 @@ Sentence:
         ai: data.ai,
         human: data.human,
         reason: data.reason,
+        // 🔴 🟠 🟢 highlight logic
         highlight:
-          data.ai >= 70 ? "high" :
-          data.ai >= 40 ? "medium" :
-          "low"
+          data.ai >= 75
+            ? "high"     // 🔴 AI-heavy
+            : data.ai >= 45
+            ? "medium"   // 🟠 Mixed
+            : "low"      // 🟢 Human
       });
     }
 
-    const avgAI = Math.round(totalAI / results.length);
+    const avgAI = results.length
+      ? Math.round(totalAI / results.length)
+      : 0;
+
     const avgHuman = 100 - avgAI;
 
     res.json({
@@ -172,9 +192,9 @@ Sentence:
         ai_probability: avgAI,
         human_probability: avgHuman,
         verdict:
-          avgAI >= 70
+          avgAI >= 75
             ? "Likely AI-generated"
-            : avgAI >= 40
+            : avgAI >= 45
             ? "Possibly AI-generated"
             : "Likely Human-written"
       },
@@ -183,14 +203,9 @@ Sentence:
 
   } catch (error) {
     console.error("DETECT ERROR:", error.message);
-    res.status(500).json({ error: "Detection failed" });
+    res.status(500).json({
+      error: "Detection failed",
+      details: error.message
+    });
   }
-});
-
-/* =========================
-   SERVER START
-========================= */
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
 });
