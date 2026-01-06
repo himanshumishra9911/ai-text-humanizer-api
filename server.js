@@ -122,62 +122,78 @@ app.post("/detect", async (req, res) => {
     let totalAI = 0;
 
     for (const sentence of sentences) {
-      const response = await openai.responses.create({
-        model: "gpt-4.1-mini",
-        input: sentence,
-        instructions: `
-You are a STRICT AI content detection system.
+      let aiScore = 70;   // DEFAULT STRICT AI
+      let humanScore = 30;
+      let reason = "Structured or neutral sentence";
 
-Rules:
-- Be skeptical by default
-- Polished, neutral, SEO-style sentences → AI
-- If unsure, lean AI
-- Return ONLY valid JSON
+      try {
+        const response = await openai.responses.create({
+          model: "gpt-4.1-mini",
+          input: sentence,
+          instructions: `
+You are a VERY STRICT AI content detector.
 
-Format:
+Assume text is AI-generated unless it clearly shows:
+- personal opinion
+- emotional language
+- casual imperfection
+- inconsistency
+
+Return ONLY JSON:
 {
   "ai": number,
   "human": number,
-  "reason": "short explanation"
+  "reason": "short reason"
 }
+
+Rules:
+- ai + human = 100
+- Polished, informative, SEO text = ai >= 80
+- Neutral explanation = ai >= 70
+- Casual opinion = ai <= 40
 
 Sentence:
 "${sentence}"
 `
-      });
+        });
 
-      let data;
-      try {
-        data = JSON.parse(response.output_text);
-      } catch {
-        continue;
+        const parsed = JSON.parse(
+          response.output_text ||
+          response.output?.[0]?.content?.[0]?.text
+        );
+
+        aiScore = parsed.ai;
+        humanScore = parsed.human;
+        reason = parsed.reason;
+
+      } catch (e) {
+        // fallback remains strict AI
       }
 
-      totalAI += data.ai;
+      totalAI += aiScore;
 
       results.push({
         sentence,
-        ai: data.ai,
-        human: data.human,
-        reason: data.reason,
+        ai: aiScore,
+        human: humanScore,
+        reason,
         highlight:
-          data.ai >= 75
-            ? "high"     // 🔴 AI
-            : data.ai >= 45
-            ? "medium"   // 🟠 Mixed
-            : "low"      // 🟢 Human
+          aiScore >= 75
+            ? "high"    // 🔴
+            : aiScore >= 45
+            ? "medium"  // 🟠
+            : "low"     // 🟢
       });
     }
 
-    const avgAI = results.length
-      ? Math.round(totalAI / results.length)
-      : 0;
+    const avgAI = Math.round(totalAI / results.length);
+    const avgHuman = 100 - avgAI;
 
     res.json({
       success: true,
       overall: {
         ai_probability: avgAI,
-        human_probability: 100 - avgAI,
+        human_probability: avgHuman,
         verdict:
           avgAI >= 75
             ? "Likely AI-generated"
@@ -190,17 +206,6 @@ Sentence:
 
   } catch (error) {
     console.error("DETECT ERROR:", error.message);
-    res.status(500).json({
-      error: "Detection failed",
-      details: error.message
-    });
+    res.status(500).json({ error: "Detection failed" });
   }
-});
-
-/* =========================
-   SERVER START (🔥 THIS WAS MISSING)
-========================= */
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
 });
