@@ -9,22 +9,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 // Health check
 app.get("/", (req, res) => {
-  res.json({ status: "AI Text Humanizer API is running" });
+  res.json({ status: "AI Humanizer + Detector API running" });
 });
 
-// Humanizer API (detector-focused)
+/* =========================
+   AI TEXT HUMANIZER
+========================= */
 app.post("/humanize", async (req, res) => {
   try {
     const { text } = req.body;
-
-    if (!text || text.trim() === "") {
+    if (!text || !text.trim()) {
       return res.status(400).json({ error: "Text is required" });
     }
 
@@ -32,47 +32,29 @@ app.post("/humanize", async (req, res) => {
       model: "gpt-4.1-mini",
       input: text,
       instructions: `
-Rewrite the text as if it were written casually by a real person, not an AI.
+Rewrite the text as if written casually by a real person.
 
-Guidelines:
-- Keep the original meaning exactly the same
-- Write naturally, the way humans actually think and type
-- Vary sentence length unevenly; avoid balance and symmetry
-- Occasionally use sentence fragments or slightly informal phrasing
-- Avoid polished, academic, or editor-like tone
-- Let the writing feel a little imperfect, but still clear
-- Do not explain anything
-- Do not ask questions
-- Do not add headings or formatting
-- Do not mention rewriting, editing, or AI
-- Return ONLY the rewritten text
-
-Write like a human who knows the topic but isn’t trying to sound perfect.
+Rules:
+- Keep meaning unchanged
+- Natural, uneven sentence flow
+- Slight imperfections allowed
+- Avoid formal or academic tone
+- No explanations, no questions
+- Return ONLY rewritten text
 `,
       temperature: 1.15,
       top_p: 0.85
     });
 
-    // -------- Safe extraction --------
-    let humanizedText = "";
+    let output =
+      response.output_text ||
+      response.output?.[0]?.content?.[0]?.text;
 
-    if (response.output_text) {
-      humanizedText = response.output_text;
-    } else if (
-      response.output &&
-      response.output[0] &&
-      response.output[0].content &&
-      response.output[0].content[0] &&
-      response.output[0].content[0].text
-    ) {
-      humanizedText = response.output[0].content[0].text;
+    if (!output) {
+      return res.status(500).json({ error: "No output generated" });
     }
 
-    if (!humanizedText) {
-      return res.status(500).json({ error: "No text generated" });
-    }
-
-    // -------- Human noise injection (detector breaker) --------
+    // ---- Human noise injection ----
     const fillers = [
       "Honestly,",
       "In simple terms,",
@@ -84,9 +66,9 @@ Write like a human who knows the topic but isn’t trying to sound perfect.
 
     const endings = [
       "",
-      " And yeah, it just works.",
+      " It just works.",
       " Nothing too fancy.",
-      " It’s pretty straightforward.",
+      " Pretty straightforward.",
       ""
     ];
 
@@ -94,38 +76,83 @@ Write like a human who knows the topic but isn’t trying to sound perfect.
       const sentences = text.split(". ");
       if (sentences.length < 3) return text;
 
-      // Random filler at start
       const start = fillers[Math.floor(Math.random() * fillers.length)];
-      if (start) {
-        sentences[0] = `${start} ${sentences[0]}`;
-      }
+      if (start) sentences[0] = `${start} ${sentences[0]}`;
 
-      // Randomly weaken one sentence (remove a comma if exists)
       const index = Math.floor(Math.random() * sentences.length);
       sentences[index] = sentences[index].replace(",", "");
 
-      // Random casual ending
       const end = endings[Math.floor(Math.random() * endings.length)];
-
       return sentences.join(". ") + end;
     }
 
-    humanizedText = injectHumanNoise(humanizedText);
+    output = injectHumanNoise(output);
 
     res.json({
       success: true,
-      humanized_text: humanizedText,
+      humanized_text: output,
     });
-  } catch (error) {
-    console.error("OPENAI ERROR:", error.message);
-    res.status(500).json({
-      error: "Humanization failed",
-      details: error.message,
-    });
+  } catch (err) {
+    console.error("HUMANIZE ERROR:", err.message);
+    res.status(500).json({ error: "Humanization failed" });
   }
 });
 
-// Render-compatible port binding
+/* =========================
+   AI TEXT DETECTOR
+========================= */
+app.post("/detect", async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: "Text is required" });
+    }
+
+    const response = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: text,
+      instructions: `
+Analyze the text and estimate AI vs human probability.
+
+Consider:
+- Predictability
+- Sentence uniformity
+- Burstiness
+- Repetition
+- Structural smoothness
+
+Return ONLY valid JSON in this format:
+{
+  "ai_probability": number (0-100),
+  "human_probability": number (0-100),
+  "verdict": "Likely AI-generated" or "Likely Human-written"
+}
+`
+    });
+
+    const raw =
+      response.output_text ||
+      response.output?.[0]?.content?.[0]?.text;
+
+    if (!raw) {
+      return res.status(500).json({ error: "No detection output" });
+    }
+
+    const parsed = JSON.parse(raw);
+
+    res.json({
+      success: true,
+      ai_probability: parsed.ai_probability,
+      human_probability: parsed.human_probability,
+      verdict: parsed.verdict,
+    });
+  } catch (err) {
+    console.error("DETECT ERROR:", err.message);
+    res.status(500).json({ error: "Detection failed" });
+  }
+});
+
+// Render compatible port
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
