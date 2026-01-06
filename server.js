@@ -113,7 +113,6 @@ app.post("/detect", async (req, res) => {
       return res.status(400).json({ error: "Text is required" });
     }
 
-    // Split text into meaningful sentences
     const sentences = text
       .split(/(?<=[.!?])\s+/)
       .map(s => s.trim())
@@ -129,27 +128,18 @@ app.post("/detect", async (req, res) => {
         instructions: `
 You are a STRICT AI content detection system.
 
-Your task is to judge how likely the sentence is AI-generated.
-
 Rules:
 - Be skeptical by default
-- Neutral, informational, SEO-style, or polished sentences → AI
-- Only mark human if there is clear opinion, inconsistency, casual tone, or natural imperfection
-- If unsure, lean towards AI
-- Do NOT be generous
+- Polished, neutral, SEO-style sentences → AI
+- If unsure, lean AI
+- Return ONLY valid JSON
 
-Return ONLY valid JSON in this exact format:
+Format:
 {
   "ai": number,
   "human": number,
   "reason": "short explanation"
 }
-
-Rules:
-- ai + human must equal 100
-- ai must be >= 80 for formal or polished sentences
-- ai must be >= 60 for neutral informational sentences
-- Do NOT include any extra text
 
 Sentence:
 "${sentence}"
@@ -170,10 +160,9 @@ Sentence:
         ai: data.ai,
         human: data.human,
         reason: data.reason,
-        // 🔴 🟠 🟢 highlight logic
         highlight:
           data.ai >= 75
-            ? "high"     // 🔴 AI-heavy
+            ? "high"     // 🔴 AI
             : data.ai >= 45
             ? "medium"   // 🟠 Mixed
             : "low"      // 🟢 Human
@@ -184,13 +173,11 @@ Sentence:
       ? Math.round(totalAI / results.length)
       : 0;
 
-    const avgHuman = 100 - avgAI;
-
     res.json({
       success: true,
       overall: {
         ai_probability: avgAI,
-        human_probability: avgHuman,
+        human_probability: 100 - avgAI,
         verdict:
           avgAI >= 75
             ? "Likely AI-generated"
@@ -208,4 +195,12 @@ Sentence:
       details: error.message
     });
   }
+});
+
+/* =========================
+   SERVER START (🔥 THIS WAS MISSING)
+========================= */
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
 });
