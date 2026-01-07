@@ -9,29 +9,43 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// =========================
+// CONFIG
+// =========================
+const MAX_WORDS = 200;
+
 // OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-/* =========================
-   HEALTH CHECK
-========================= */
+// =========================
+// HEALTH CHECK
+// =========================
 app.get("/", (req, res) => {
   res.json({ status: "AI Humanizer + Detector API running" });
 });
 
-/* =========================
-   AI TEXT HUMANIZER
-========================= */
+// =========================
+// AI TEXT HUMANIZER
+// =========================
 app.post("/humanize", async (req, res) => {
   try {
     const { text } = req.body;
 
+    // ---- Validation ----
     if (!text || !text.trim()) {
       return res.status(400).json({ error: "Text is required" });
     }
 
+    const wordCount = text.trim().split(/\s+/).length;
+    if (wordCount > MAX_WORDS) {
+      return res.status(400).json({
+        error: `Word limit exceeded. Maximum ${MAX_WORDS} words allowed.`,
+      });
+    }
+
+    // ---- OpenAI Call ----
     const response = await openai.responses.create({
       model: "gpt-4.1-mini",
       input: text,
@@ -58,7 +72,7 @@ Rules:
       return res.status(500).json({ error: "No output generated" });
     }
 
-    // ---- Human noise injection ----
+    // ---- Human Noise Injection ----
     const fillers = [
       "Honestly,",
       "In simple terms,",
@@ -95,24 +109,36 @@ Rules:
     res.json({
       success: true,
       humanized_text: output,
+      words_used: wordCount,
+      words_left: MAX_WORDS - wordCount,
     });
+
   } catch (err) {
     console.error("HUMANIZE ERROR:", err.message);
     res.status(500).json({ error: "Humanization failed" });
   }
 });
 
-/* =========================
-   AI TEXT DETECTOR (STRICT + HIGHLIGHT READY)
-========================= */
+// =========================
+// AI TEXT DETECTOR (STRICT)
+// =========================
 app.post("/detect", async (req, res) => {
   try {
     const { text } = req.body;
 
+    // ---- Validation ----
     if (!text || !text.trim()) {
       return res.status(400).json({ error: "Text is required" });
     }
 
+    const wordCount = text.trim().split(/\s+/).length;
+    if (wordCount > MAX_WORDS) {
+      return res.status(400).json({
+        error: `Word limit exceeded. Maximum ${MAX_WORDS} words allowed.`,
+      });
+    }
+
+    // ---- Sentence split ----
     const sentences = text
       .split(/(?<=[.!?])\s+/)
       .map(s => s.trim())
@@ -122,7 +148,7 @@ app.post("/detect", async (req, res) => {
     let totalAI = 0;
 
     for (const sentence of sentences) {
-      let aiScore = 70;   // DEFAULT STRICT AI
+      let aiScore = 70;   // strict default
       let humanScore = 30;
       let reason = "Structured or neutral sentence";
 
@@ -135,11 +161,11 @@ You are a VERY STRICT AI content detector.
 
 Assume text is AI-generated unless it clearly shows:
 - personal opinion
-- emotional language
+- emotion
 - casual imperfection
 - inconsistency
 
-Return ONLY JSON:
+Return ONLY valid JSON:
 {
   "ai": number,
   "human": number,
@@ -148,9 +174,9 @@ Return ONLY JSON:
 
 Rules:
 - ai + human = 100
-- Polished, informative, SEO text = ai >= 80
-- Neutral explanation = ai >= 70
-- Casual opinion = ai <= 40
+- Polished / SEO text → ai >= 80
+- Neutral explanation → ai >= 70
+- Casual opinion → ai <= 40
 
 Sentence:
 "${sentence}"
@@ -179,18 +205,23 @@ Sentence:
         reason,
         highlight:
           aiScore >= 75
-            ? "high"    // 🔴
+            ? "high"    // 🔴 AI
             : aiScore >= 45
-            ? "medium"  // 🟠
-            : "low"     // 🟢
+            ? "medium"  // 🟠 Mixed
+            : "low"     // 🟢 Human
       });
     }
 
-    const avgAI = Math.round(totalAI / results.length);
+    const avgAI = results.length
+      ? Math.round(totalAI / results.length)
+      : 0;
+
     const avgHuman = 100 - avgAI;
 
     res.json({
       success: true,
+      words_used: wordCount,
+      words_left: MAX_WORDS - wordCount,
       overall: {
         ai_probability: avgAI,
         human_probability: avgHuman,
@@ -209,12 +240,12 @@ Sentence:
     res.status(500).json({ error: "Detection failed" });
   }
 });
-/* =========================
-   SERVER START (REQUIRED)
-========================= */
+
+// =========================
+// SERVER START (RENDER)
+// =========================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
-
