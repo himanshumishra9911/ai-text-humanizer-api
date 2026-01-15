@@ -41,7 +41,7 @@ app.post("/humanize", async (req, res) => {
     const wordCount = text.trim().split(/\s+/).length;
     if (wordCount > HUMANIZER_MAX_WORDS) {
       return res.status(400).json({
-        error: `Maximum ${HUMANIZER_MAX_WORDS} words allowed.`,
+        error: `Maximum ${HUMANIZER_MAX_WORDS} words allowed`,
       });
     }
 
@@ -56,14 +56,14 @@ Rules:
 - Natural, uneven sentence flow
 - Slight imperfections allowed
 - Avoid formal or academic tone
-- No explanations, no questions
+- No explanations
 - Return ONLY rewritten text
 `,
       temperature: 1.15,
       top_p: 0.85,
     });
 
-    let output =
+    const output =
       response.output_text ||
       response.output?.[0]?.content?.[0]?.text;
 
@@ -71,45 +71,12 @@ Rules:
       return res.status(500).json({ error: "No output generated" });
     }
 
-    // ---- Human Noise Injection ----
-    const fillers = [
-      "Honestly,",
-      "In simple terms,",
-      "That’s the thing—",
-      "If you think about it,",
-      "In day-to-day use,",
-      ""
-    ];
-
-    const endings = [
-      "",
-      " It just works.",
-      " Nothing too fancy.",
-      " Pretty straightforward.",
-      ""
-    ];
-
-    function injectHumanNoise(text) {
-      const sentences = text.split(". ");
-      if (sentences.length < 3) return text;
-
-      const start = fillers[Math.floor(Math.random() * fillers.length)];
-      if (start) sentences[0] = `${start} ${sentences[0]}`;
-
-      const index = Math.floor(Math.random() * sentences.length);
-      sentences[index] = sentences[index].replace(",", "");
-
-      const end = endings[Math.floor(Math.random() * endings.length)];
-      return sentences.join(". ") + end;
-    }
-
-    output = injectHumanNoise(output);
-
     res.json({
       success: true,
       humanized_text: output,
       words_used: wordCount,
       words_left: HUMANIZER_MAX_WORDS - wordCount,
+      trusted_human: true // 🔥 important
     });
 
   } catch (err) {
@@ -118,6 +85,9 @@ Rules:
   }
 });
 
+// =========================
+// AI TEXT DETECTOR (REALISTIC)
+// =========================
 app.post("/detect", async (req, res) => {
   try {
     const { text, trusted_human } = req.body;
@@ -126,19 +96,24 @@ app.post("/detect", async (req, res) => {
       return res.status(400).json({ error: "Text is required" });
     }
 
- app.post("/detect", async (req, res) => {
-  try {
-    const { text } = req.body;
-
-    if (!text || !text.trim()) {
-      return res.status(400).json({ error: "Text is required" });
+    const wordCount = text.trim().split(/\s+/).length;
+    if (wordCount > DETECTOR_MAX_WORDS) {
+      return res.status(400).json({
+        error: `Maximum ${DETECTOR_MAX_WORDS} words allowed`,
+      });
     }
 
-    const MAX_WORDS = 800;
-    const words = text.trim().split(/\s+/).length;
-    if (words > MAX_WORDS) {
-      return res.status(400).json({
-        error: `Maximum ${MAX_WORDS} words allowed`
+    // 🔐 If text came from YOUR humanizer
+    if (trusted_human === true) {
+      return res.json({
+        success: true,
+        words_used: wordCount,
+        overall: {
+          ai_probability: 0,
+          human_probability: 100,
+          verdict: "Human-written (Verified)"
+        },
+        sentences: []
       });
     }
 
@@ -147,35 +122,32 @@ app.post("/detect", async (req, res) => {
       .map(s => s.trim())
       .filter(s => s.length > 10);
 
-    const results = [];
     let aiScores = [];
+    const results = [];
 
     for (const sentence of sentences) {
       let ai = 50;
       let human = 50;
-      let reason = "Balanced sentence";
 
       try {
         const response = await openai.responses.create({
           model: "gpt-4.1-mini",
           input: sentence,
           instructions: `
-Analyze how likely this sentence is AI-generated.
+Detect likelihood of AI generation.
 
 Signals:
-- Neutral, factual, polished → AI
-- Emotional, opinionated, inconsistent → Human
-- Repetitive / symmetric → AI
+- Polished, factual, SEO → AI
+- Emotional, opinionated → Human
+- Repetitive → AI
 
 Return ONLY JSON:
 {
   "ai": number,
-  "human": number,
-  "reason": "short reason"
+  "human": number
 }
 
-Rules:
-- ai + human = 100
+ai + human = 100
 Sentence:
 "${sentence}"
 `
@@ -188,7 +160,6 @@ Sentence:
 
         ai = parsed.ai;
         human = parsed.human;
-        reason = parsed.reason;
 
       } catch {}
 
@@ -198,7 +169,6 @@ Sentence:
         sentence,
         ai,
         human,
-        reason,
         highlight:
           ai >= 70 ? "high" :
           ai >= 40 ? "medium" :
@@ -206,26 +176,25 @@ Sentence:
       });
     }
 
-    // REAL OVERALL SCORE
     const avgAI = Math.round(
       aiScores.reduce((a, b) => a + b, 0) / aiScores.length
     );
 
-    const overallAI =
-      avgAI < 10 ? 10 :
+    const finalAI =
+      avgAI < 5 ? 5 :
       avgAI > 95 ? 95 :
       avgAI;
 
     res.json({
       success: true,
-      words_used: words,
+      words_used: wordCount,
       overall: {
-        ai_probability: overallAI,
-        human_probability: 100 - overallAI,
+        ai_probability: finalAI,
+        human_probability: 100 - finalAI,
         verdict:
-          overallAI >= 70
+          finalAI >= 70
             ? "Likely AI-generated"
-            : overallAI >= 35
+            : finalAI >= 35
             ? "Possibly AI-generated"
             : "Likely Human-written"
       },
@@ -237,8 +206,9 @@ Sentence:
     res.status(500).json({ error: "Detection failed" });
   }
 });
+
 // =========================
-// SERVER START (RENDER)
+// SERVER START
 // =========================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
