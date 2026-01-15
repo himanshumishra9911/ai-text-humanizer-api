@@ -129,31 +129,31 @@ app.post("/detect", async (req, res) => {
       return res.status(400).json({ error: "Text is required" });
     }
 
+    const MAX_WORDS = 800;
     const wordCount = text.trim().split(/\s+/).length;
-    if (wordCount > DETECTOR_MAX_WORDS) {
+
+    if (wordCount > MAX_WORDS) {
       return res.status(400).json({
-        error: `Maximum ${DETECTOR_MAX_WORDS} words allowed`,
+        error: `Maximum ${MAX_WORDS} words allowed`,
       });
     }
 
     // =========================
-    // 🔒 HARD TRUST LOGIC
+    // 🔒 TRUSTED HUMAN (ONLY HUMANIZER OUTPUT)
     // =========================
     if (trusted_human === true) {
       return res.json({
         success: true,
-        words_used: wordCount,
-        words_left: DETECTOR_MAX_WORDS - wordCount,
         overall: {
-          ai_probability: 0,
-          human_probability: 100,
+          ai_probability: 2,
+          human_probability: 98,
           verdict: "Human-written (Verified)"
         },
         sentences: text.split(/(?<=[.!?])\s+/).map(s => ({
           sentence: s,
-          ai: 0,
-          human: 100,
-          reason: "Verified humanized content",
+          ai: 2,
+          human: 98,
+          reason: "Verified humanized output",
           highlight: "low"
         }))
       });
@@ -165,28 +165,26 @@ app.post("/detect", async (req, res) => {
     const sentences = text
       .split(/(?<=[.!?])\s+/)
       .map(s => s.trim())
-      .filter(s => s.length > 12);
+      .filter(s => s.length > 10);
 
-    let aiHeavy = 0;
-    let mixed = 0;
-    let human = 0;
+    let aiScores = [];
     const results = [];
 
     for (const sentence of sentences) {
-      let aiScore = 60;
-      let humanScore = 40;
-      let reason = "Neutral sentence";
+      let ai = 55;
+      let human = 45;
+      let reason = "Neutral structure";
 
       try {
         const response = await openai.responses.create({
           model: "gpt-4.1-mini",
           input: sentence,
           instructions: `
-Detect if the sentence is AI-written or human-written.
+Judge how likely the sentence is AI-written.
 
-Guidelines:
-- SEO / informational / polished → AI
-- Emotional / opinionated / casual → Human
+Signals:
+- Informational, neutral, polished → AI
+- Emotional, opinionated, uneven → Human
 - Mixed tone → Mixed
 
 Return ONLY JSON:
@@ -208,52 +206,54 @@ Sentence:
           response.output?.[0]?.content?.[0]?.text
         );
 
-        aiScore = parsed.ai;
-        humanScore = parsed.human;
+        ai = parsed.ai;
+        human = parsed.human;
         reason = parsed.reason;
 
       } catch {}
 
-      if (aiScore >= 70) aiHeavy++;
-      else if (aiScore >= 40) mixed++;
-      else human++;
+      aiScores.push(ai);
 
       results.push({
         sentence,
-        ai: aiScore,
-        human: humanScore,
+        ai,
+        human,
         reason,
         highlight:
-          aiScore >= 70 ? "high" :
-          aiScore >= 40 ? "medium" :
+          ai >= 70 ? "high" :
+          ai >= 40 ? "medium" :
           "low"
       });
     }
 
-    const total = results.length || 1;
+    // =========================
+    // 🧠 REAL OVERALL LOGIC
+    // =========================
+    const avgAI =
+      aiScores.reduce((a, b) => a + b, 0) / aiScores.length;
 
-    // =========================
-    // SMART OVERALL SCORE
-    // =========================
     let overallAI;
 
-    if (human / total >= 0.7) {
-      overallAI = Math.min(15, Math.round((aiHeavy / total) * 20));
-    } else if (aiHeavy / total >= 0.7) {
-      overallAI = Math.min(95, Math.round(70 + (aiHeavy / total) * 25));
+    if (avgAI < 20) {
+      // Real human writing still not 0
+      overallAI = Math.max(5, Math.round(avgAI));
+    } else if (avgAI < 40) {
+      overallAI = Math.round(avgAI);
+    } else if (avgAI < 70) {
+      overallAI = Math.round(avgAI + 5);
     } else {
-      overallAI = Math.round(
-        (aiHeavy * 75 + mixed * 50 + human * 20) / total
-      );
+      overallAI = Math.min(95, Math.round(avgAI + 10));
     }
+
+    const overallHuman = 100 - overallAI;
 
     res.json({
       success: true,
       words_used: wordCount,
-      words_left: DETECTOR_MAX_WORDS - wordCount,
+      words_left: MAX_WORDS - wordCount,
       overall: {
         ai_probability: overallAI,
-        human_probability: 100 - overallAI,
+        human_probability: overallHuman,
         verdict:
           overallAI >= 70
             ? "Likely AI-generated"
