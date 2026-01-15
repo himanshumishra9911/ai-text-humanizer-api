@@ -120,42 +120,40 @@ Rules:
 });
 
 // =========================
-// AI TEXT DETECTOR (SMART + QUILLBOT STYLE)
+// AI TEXT DETECTOR (FIXED + BALANCED)
 // =========================
 app.post("/detect", async (req, res) => {
   try {
     const { text } = req.body;
 
-    // ---- Validation ----
     if (!text || !text.trim()) {
       return res.status(400).json({ error: "Text is required" });
     }
 
-    // 🔒 800 WORD LIMIT
+    // 🔒 HARD LIMIT
+    const DETECTOR_MAX_WORDS = 800;
     const wordCount = text.trim().split(/\s+/).length;
-    const MAX_WORDS = 800;
 
-    if (wordCount > MAX_WORDS) {
+    if (wordCount > DETECTOR_MAX_WORDS) {
       return res.status(400).json({
-        error: `Maximum ${MAX_WORDS} words allowed`,
+        error: `Maximum ${DETECTOR_MAX_WORDS} words allowed`,
       });
     }
 
-    // ---- Sentence split ----
     const sentences = text
       .split(/(?<=[.!?])\s+/)
       .map(s => s.trim())
       .filter(s => s.length > 12);
 
-    const results = [];
-
     let aiHeavy = 0;
     let mixed = 0;
     let human = 0;
 
+    const results = [];
+
     for (const sentence of sentences) {
-      let aiScore = 70;    // default AI-leaning
-      let humanScore = 30;
+      let aiScore = 65;   // balanced default
+      let humanScore = 35;
       let reason = "Neutral structured sentence";
 
       try {
@@ -163,15 +161,15 @@ app.post("/detect", async (req, res) => {
           model: "gpt-4.1-mini",
           input: sentence,
           instructions: `
-You are an AI content detector similar to QuillBot.
+You are an AI content detector.
 
-Judgement rules:
-- Informational, SEO, neutral, polished sentences → AI
-- Repetitive or symmetrical structure → AI
-- Emotional tone, opinion, casual flow → Human
-- If unsure, lean towards AI (not human)
+Guidelines:
+- Informational, SEO, neutral tone → AI
+- Emotional, opinionated, casual → Human
+- If mixed → medium
+- Do NOT exaggerate
 
-Return ONLY valid JSON:
+Return ONLY JSON:
 {
   "ai": number,
   "human": number,
@@ -180,8 +178,6 @@ Return ONLY valid JSON:
 
 Rules:
 - ai + human = 100
-- Do NOT add any extra text
-
 Sentence:
 "${sentence}"
 `
@@ -196,11 +192,8 @@ Sentence:
         humanScore = parsed.human;
         reason = parsed.reason;
 
-      } catch {
-        // fallback remains AI-leaning
-      }
+      } catch {}
 
-      // ---- Classification ----
       if (aiScore >= 70) aiHeavy++;
       else if (aiScore >= 40) mixed++;
       else human++;
@@ -212,30 +205,28 @@ Sentence:
         reason,
         highlight:
           aiScore >= 70
-            ? "high"    // 🔴 AI
+            ? "high"
             : aiScore >= 40
-            ? "medium"  // 🟠 Mixed
-            : "low"     // 🟢 Human
+            ? "medium"
+            : "low"
       });
     }
 
     const total = results.length || 1;
 
     // =========================
-    // 🧠 SMART OVERALL LOGIC
+    // 🧠 FIXED OVERALL LOGIC
     // =========================
     let overallAI;
 
-    // 🟢 Mostly human → force AI very low (Humanizer-safe)
-    if (human / total >= 0.8) {
-      overallAI = Math.min(5, Math.round((aiHeavy / total) * 10));
-    }
-    // 🔴 Mostly AI content
-    else if (aiHeavy / total >= 0.6) {
-      overallAI = Math.round(70 + (aiHeavy / total) * 30);
-    }
-    // 🟠 Mixed content
-    else {
+    if (human / total >= 0.7) {
+      // Mostly human
+      overallAI = Math.max(0, Math.min(10, Math.round((aiHeavy / total) * 15)));
+    } else if (aiHeavy / total >= 0.7) {
+      // Mostly AI
+      overallAI = Math.min(95, Math.round(70 + (aiHeavy / total) * 25));
+    } else {
+      // Mixed
       overallAI = Math.round(
         (aiHeavy * 80 + mixed * 50 + human * 20) / total
       );
@@ -246,7 +237,7 @@ Sentence:
     res.json({
       success: true,
       words_used: wordCount,
-      words_left: MAX_WORDS - wordCount,
+      words_left: DETECTOR_MAX_WORDS - wordCount,
       overall: {
         ai_probability: overallAI,
         human_probability: overallHuman,
@@ -264,6 +255,7 @@ Sentence:
     console.error("DETECT ERROR:", error.message);
     res.status(500).json({ error: "Detection failed" });
   }
+});
 });
 // =========================
 // SERVER START (RENDER)
