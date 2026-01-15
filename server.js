@@ -118,12 +118,12 @@ Rules:
   }
 });
 
-// =========================
-// AI TEXT DETECTOR (FIXED + BALANCED)
+/// =========================
+// AI TEXT DETECTOR (BEST PRACTICAL)
 // =========================
 app.post("/detect", async (req, res) => {
   try {
-    const { text } = req.body;
+    const { text, trusted_human } = req.body;
 
     if (!text || !text.trim()) {
       return res.status(400).json({ error: "Text is required" });
@@ -136,6 +136,32 @@ app.post("/detect", async (req, res) => {
       });
     }
 
+    // =========================
+    // 🔒 HARD TRUST LOGIC
+    // =========================
+    if (trusted_human === true) {
+      return res.json({
+        success: true,
+        words_used: wordCount,
+        words_left: DETECTOR_MAX_WORDS - wordCount,
+        overall: {
+          ai_probability: 0,
+          human_probability: 100,
+          verdict: "Human-written (Verified)"
+        },
+        sentences: text.split(/(?<=[.!?])\s+/).map(s => ({
+          sentence: s,
+          ai: 0,
+          human: 100,
+          reason: "Verified humanized content",
+          highlight: "low"
+        }))
+      });
+    }
+
+    // =========================
+    // NORMAL DETECTION
+    // =========================
     const sentences = text
       .split(/(?<=[.!?])\s+/)
       .map(s => s.trim())
@@ -144,26 +170,24 @@ app.post("/detect", async (req, res) => {
     let aiHeavy = 0;
     let mixed = 0;
     let human = 0;
-
     const results = [];
 
     for (const sentence of sentences) {
-      let aiScore = 65;
-      let humanScore = 35;
-      let reason = "Neutral structured sentence";
+      let aiScore = 60;
+      let humanScore = 40;
+      let reason = "Neutral sentence";
 
       try {
         const response = await openai.responses.create({
           model: "gpt-4.1-mini",
           input: sentence,
           instructions: `
-You are an AI content detector.
+Detect if the sentence is AI-written or human-written.
 
 Guidelines:
-- Informational, SEO, neutral tone → AI
-- Emotional, opinionated, casual → Human
-- If mixed → medium
-- Do NOT exaggerate
+- SEO / informational / polished → AI
+- Emotional / opinionated / casual → Human
+- Mixed tone → Mixed
 
 Return ONLY JSON:
 {
@@ -200,29 +224,28 @@ Sentence:
         human: humanScore,
         reason,
         highlight:
-          aiScore >= 70
-            ? "high"
-            : aiScore >= 40
-            ? "medium"
-            : "low"
+          aiScore >= 70 ? "high" :
+          aiScore >= 40 ? "medium" :
+          "low"
       });
     }
 
     const total = results.length || 1;
 
+    // =========================
+    // SMART OVERALL SCORE
+    // =========================
     let overallAI;
 
     if (human / total >= 0.7) {
-      overallAI = Math.max(0, Math.min(10, Math.round((aiHeavy / total) * 15)));
+      overallAI = Math.min(15, Math.round((aiHeavy / total) * 20));
     } else if (aiHeavy / total >= 0.7) {
       overallAI = Math.min(95, Math.round(70 + (aiHeavy / total) * 25));
     } else {
       overallAI = Math.round(
-        (aiHeavy * 80 + mixed * 50 + human * 20) / total
+        (aiHeavy * 75 + mixed * 50 + human * 20) / total
       );
     }
-
-    const overallHuman = 100 - overallAI;
 
     res.json({
       success: true,
@@ -230,7 +253,7 @@ Sentence:
       words_left: DETECTOR_MAX_WORDS - wordCount,
       overall: {
         ai_probability: overallAI,
-        human_probability: overallHuman,
+        human_probability: 100 - overallAI,
         verdict:
           overallAI >= 70
             ? "Likely AI-generated"
@@ -251,7 +274,6 @@ Sentence:
 // SERVER START (RENDER)
 // =========================
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
