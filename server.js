@@ -120,7 +120,7 @@ Rules:
 });
 
 // =========================
-// AI TEXT DETECTOR (STRICT)
+// AI TEXT DETECTOR (SMART + QUILLBOT STYLE)
 // =========================
 app.post("/detect", async (req, res) => {
   try {
@@ -131,10 +131,13 @@ app.post("/detect", async (req, res) => {
       return res.status(400).json({ error: "Text is required" });
     }
 
+    // 🔒 800 WORD LIMIT
     const wordCount = text.trim().split(/\s+/).length;
+    const MAX_WORDS = 800;
+
     if (wordCount > MAX_WORDS) {
       return res.status(400).json({
-        error: `Word limit exceeded. Maximum ${MAX_WORDS} words allowed.`,
+        error: `Maximum ${MAX_WORDS} words allowed`,
       });
     }
 
@@ -142,28 +145,31 @@ app.post("/detect", async (req, res) => {
     const sentences = text
       .split(/(?<=[.!?])\s+/)
       .map(s => s.trim())
-      .filter(s => s.length > 10);
+      .filter(s => s.length > 12);
 
     const results = [];
-    let totalAI = 0;
+
+    let aiHeavy = 0;
+    let mixed = 0;
+    let human = 0;
 
     for (const sentence of sentences) {
-      let aiScore = 70;   // strict default
+      let aiScore = 70;    // default AI-leaning
       let humanScore = 30;
-      let reason = "Structured or neutral sentence";
+      let reason = "Neutral structured sentence";
 
       try {
         const response = await openai.responses.create({
           model: "gpt-4.1-mini",
           input: sentence,
           instructions: `
-You are a VERY STRICT AI content detector.
+You are an AI content detector similar to QuillBot.
 
-Assume text is AI-generated unless it clearly shows:
-- personal opinion
-- emotion
-- casual imperfection
-- inconsistency
+Judgement rules:
+- Informational, SEO, neutral, polished sentences → AI
+- Repetitive or symmetrical structure → AI
+- Emotional tone, opinion, casual flow → Human
+- If unsure, lean towards AI (not human)
 
 Return ONLY valid JSON:
 {
@@ -174,9 +180,7 @@ Return ONLY valid JSON:
 
 Rules:
 - ai + human = 100
-- Polished / SEO text → ai >= 80
-- Neutral explanation → ai >= 70
-- Casual opinion → ai <= 40
+- Do NOT add any extra text
 
 Sentence:
 "${sentence}"
@@ -192,11 +196,14 @@ Sentence:
         humanScore = parsed.human;
         reason = parsed.reason;
 
-      } catch (e) {
-        // fallback remains strict AI
+      } catch {
+        // fallback remains AI-leaning
       }
 
-      totalAI += aiScore;
+      // ---- Classification ----
+      if (aiScore >= 70) aiHeavy++;
+      else if (aiScore >= 40) mixed++;
+      else human++;
 
       results.push({
         sentence,
@@ -204,31 +211,49 @@ Sentence:
         human: humanScore,
         reason,
         highlight:
-          aiScore >= 75
+          aiScore >= 70
             ? "high"    // 🔴 AI
-            : aiScore >= 45
+            : aiScore >= 40
             ? "medium"  // 🟠 Mixed
             : "low"     // 🟢 Human
       });
     }
 
-    const avgAI = results.length
-      ? Math.round(totalAI / results.length)
-      : 0;
+    const total = results.length || 1;
 
-    const avgHuman = 100 - avgAI;
+    // =========================
+    // 🧠 SMART OVERALL LOGIC
+    // =========================
+    let overallAI;
+
+    // 🟢 Mostly human → force AI very low (Humanizer-safe)
+    if (human / total >= 0.8) {
+      overallAI = Math.min(5, Math.round((aiHeavy / total) * 10));
+    }
+    // 🔴 Mostly AI content
+    else if (aiHeavy / total >= 0.6) {
+      overallAI = Math.round(70 + (aiHeavy / total) * 30);
+    }
+    // 🟠 Mixed content
+    else {
+      overallAI = Math.round(
+        (aiHeavy * 80 + mixed * 50 + human * 20) / total
+      );
+    }
+
+    const overallHuman = 100 - overallAI;
 
     res.json({
       success: true,
       words_used: wordCount,
       words_left: MAX_WORDS - wordCount,
       overall: {
-        ai_probability: avgAI,
-        human_probability: avgHuman,
+        ai_probability: overallAI,
+        human_probability: overallHuman,
         verdict:
-          avgAI >= 75
+          overallAI >= 70
             ? "Likely AI-generated"
-            : avgAI >= 45
+            : overallAI >= 35
             ? "Possibly AI-generated"
             : "Likely Human-written"
       },
@@ -240,7 +265,6 @@ Sentence:
     res.status(500).json({ error: "Detection failed" });
   }
 });
-
 // =========================
 // SERVER START (RENDER)
 // =========================
