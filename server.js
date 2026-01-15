@@ -12,7 +12,8 @@ app.use(express.json());
 // =========================
 // CONFIG
 // =========================
-const MAX_WORDS = 200;
+const HUMANIZER_MAX_WORDS = 200;
+const DETECTOR_MAX_WORDS = 800;
 
 // OpenAI client
 const openai = new OpenAI({
@@ -33,19 +34,17 @@ app.post("/humanize", async (req, res) => {
   try {
     const { text } = req.body;
 
-    // ---- Validation ----
     if (!text || !text.trim()) {
       return res.status(400).json({ error: "Text is required" });
     }
 
     const wordCount = text.trim().split(/\s+/).length;
-    if (wordCount > MAX_WORDS) {
+    if (wordCount > HUMANIZER_MAX_WORDS) {
       return res.status(400).json({
-        error: `Word limit exceeded. Maximum ${MAX_WORDS} words allowed.`,
+        error: `Maximum ${HUMANIZER_MAX_WORDS} words allowed.`,
       });
     }
 
-    // ---- OpenAI Call ----
     const response = await openai.responses.create({
       model: "gpt-4.1-mini",
       input: text,
@@ -110,7 +109,7 @@ Rules:
       success: true,
       humanized_text: output,
       words_used: wordCount,
-      words_left: MAX_WORDS - wordCount,
+      words_left: HUMANIZER_MAX_WORDS - wordCount,
     });
 
   } catch (err) {
@@ -130,10 +129,7 @@ app.post("/detect", async (req, res) => {
       return res.status(400).json({ error: "Text is required" });
     }
 
-    // 🔒 HARD LIMIT
-    const DETECTOR_MAX_WORDS = 800;
     const wordCount = text.trim().split(/\s+/).length;
-
     if (wordCount > DETECTOR_MAX_WORDS) {
       return res.status(400).json({
         error: `Maximum ${DETECTOR_MAX_WORDS} words allowed`,
@@ -152,7 +148,7 @@ app.post("/detect", async (req, res) => {
     const results = [];
 
     for (const sentence of sentences) {
-      let aiScore = 65;   // balanced default
+      let aiScore = 65;
       let humanScore = 35;
       let reason = "Neutral structured sentence";
 
@@ -214,19 +210,13 @@ Sentence:
 
     const total = results.length || 1;
 
-    // =========================
-    // 🧠 FIXED OVERALL LOGIC
-    // =========================
     let overallAI;
 
     if (human / total >= 0.7) {
-      // Mostly human
       overallAI = Math.max(0, Math.min(10, Math.round((aiHeavy / total) * 15)));
     } else if (aiHeavy / total >= 0.7) {
-      // Mostly AI
       overallAI = Math.min(95, Math.round(70 + (aiHeavy / total) * 25));
     } else {
-      // Mixed
       overallAI = Math.round(
         (aiHeavy * 80 + mixed * 50 + human * 20) / total
       );
@@ -256,7 +246,7 @@ Sentence:
     res.status(500).json({ error: "Detection failed" });
   }
 });
-});
+
 // =========================
 // SERVER START (RENDER)
 // =========================
